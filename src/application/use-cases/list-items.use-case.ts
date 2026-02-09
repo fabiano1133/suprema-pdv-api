@@ -33,9 +33,9 @@ export class ListItemsUseCase implements IListItemsInboundPort {
     const filteredItems =
       term.length > 0
         ? allItems.filter((item) => {
-            const sku = (item.sku ?? '').toLowerCase();
+            const barcode = (item.barcode ?? '').toLowerCase();
             const name = (item.name ?? '').toLowerCase();
-            return sku.includes(term) || name.includes(term);
+            return barcode.includes(term) || name.includes(term);
           })
         : allItems;
 

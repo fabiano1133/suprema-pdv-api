@@ -11,7 +11,7 @@ export const LIST_ITEMS_MAX_LIMIT = 100;
  * Page 1-based, limit por página.
  */
 export class ListItemsDto {
-  /** Termo de busca (filtra por SKU ou nome). */
+  /** Termo de busca (filtra por código de barras ou nome). */
   @IsOptional()
   @IsString()
   @MaxLength(200)

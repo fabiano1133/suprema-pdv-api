@@ -5,10 +5,13 @@
 export default () => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   nodeEnv: process.env.NODE_ENV ?? 'development',
-  /** Origens permitidas no CORS. Em produção use lista explícita (ex: "https://app.empresa.com"). */
-  corsOrigins: process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim())
-    : true,
+  /** Origens permitidas no CORS. Em produção defina CORS_ORIGINS com a URL do front (ex: "https://suprema-pdv.sophos-tech-hub.com.br"). */
+  corsOrigins: (() => {
+    const raw = process.env.CORS_ORIGINS;
+    if (!raw) return true;
+    const list = raw.split(',').map((o) => o.trim()).filter(Boolean);
+    return list.length ? list : true;
+  })(),
   /** Prefixo global da API (ex: /api). */
   globalPrefix: process.env.GLOBAL_PREFIX ?? 'api',
 
