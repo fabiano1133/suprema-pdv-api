@@ -36,12 +36,18 @@ const TEXT_ZONE_PT = ZONE_MM * MM_TO_PT;
 /** Rabicho: últimos 30mm da etiqueta (não imprime conteúdo). */
 const RABICHO_ZONE_PT = ZONE_MM * MM_TO_PT;
 
-/** Altura das barras em mm (bwip-js). Menor para caber código numérico abaixo. */
-const BARCODE_BAR_HEIGHT_MM = 5;
-/** Pixels por módulo do código de barras. 3–4 evita tremulação na impressão térmica (203 DPI). */
-const BARCODE_SCALE = 4;
-/** Tamanho da fonte do número abaixo do código de barras (pt). */
-const BARCODE_TEXT_FONT_SIZE = 4;
+/** Altura das barras em mm (bwip-js). */
+const BARCODE_BAR_HEIGHT_MM = 4;
+/** Largura máxima do código de barras (mm) para não cortar na impressora. */
+const BARCODE_MAX_WIDTH_MM = 22;
+/** Deslocamento do código de barras e número para a esquerda (mm). */
+const BARCODE_LEFT_OFFSET_MM = 2;
+/** Deslocamento do bloco SKU/valor/nome para a esquerda (mm). */
+const TEXT_LEFT_OFFSET_MM = 2;
+/** Pixels por módulo (2 = bem estreito, cabe na zona). */
+const BARCODE_SCALE = 2;
+/** Fonte do número abaixo do código de barras (pt). */
+const BARCODE_TEXT_FONT_SIZE = 5;
 
 @Injectable()
 export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
@@ -94,20 +100,24 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
       });
       const imgW = png.readUInt32BE(16);
       const imgH = png.readUInt32BE(20);
-      const barcodeHeightPt = Math.min(
-        CONTENT_HEIGHT_PT - BARCODE_TEXT_FONT_SIZE * 1.5,
-        BARCODE_ZONE_PT * (imgH / imgW),
-      );
-      const barcodeWidthPt = barcodeHeightPt * (imgW / imgH);
-      const barcodeX = x + (BARCODE_ZONE_PT - barcodeWidthPt) / 2;
+      const maxBarcodeWidthPt = BARCODE_MAX_WIDTH_MM * MM_TO_PT;
+      const maxBarcodeHeightPt = CONTENT_HEIGHT_PT - BARCODE_TEXT_FONT_SIZE * 1.5;
+      let barcodeWidthPt = maxBarcodeWidthPt;
+      let barcodeHeightPt = barcodeWidthPt * (imgH / imgW);
+      if (barcodeHeightPt > maxBarcodeHeightPt) {
+        barcodeHeightPt = maxBarcodeHeightPt;
+        barcodeWidthPt = barcodeHeightPt * (imgW / imgH);
+      }
+      const leftOffsetPt = BARCODE_LEFT_OFFSET_MM * MM_TO_PT;
+      const barcodeX = x + (BARCODE_ZONE_PT - barcodeWidthPt) / 2 - leftOffsetPt;
       const blockHeight = barcodeHeightPt + BARCODE_TEXT_FONT_SIZE * 1.3;
       const barcodeY = y + (CONTENT_HEIGHT_PT - blockHeight) / 2;
       doc.image(png, barcodeX, barcodeY, {
         width: barcodeWidthPt,
         height: barcodeHeightPt,
       });
-      doc.fontSize(BARCODE_TEXT_FONT_SIZE).text(barcodeText, x, barcodeY + barcodeHeightPt + 1, {
-        width: BARCODE_ZONE_PT,
+      doc.fontSize(BARCODE_TEXT_FONT_SIZE).text(barcodeText, barcodeX, barcodeY + barcodeHeightPt + 1, {
+        width: barcodeWidthPt,
         align: 'center',
       });
     } catch {
@@ -118,7 +128,7 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     }
 
     // Zona 2 (30mm): SKU | valor | nome (fonte pequena, discreta)
-    const textX = x + BARCODE_ZONE_PT;
+    const textX = x + BARCODE_ZONE_PT - TEXT_LEFT_OFFSET_MM * MM_TO_PT;
     const fontSize = 6;
     const nameFontSize = 4;
     doc.fontSize(fontSize);
