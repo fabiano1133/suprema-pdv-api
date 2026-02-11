@@ -36,8 +36,12 @@ const TEXT_ZONE_PT = ZONE_MM * MM_TO_PT;
 /** Rabicho: últimos 30mm da etiqueta (não imprime conteúdo). */
 const RABICHO_ZONE_PT = ZONE_MM * MM_TO_PT;
 
-/** Altura das barras em mm (bwip-js). */
-const BARCODE_BAR_HEIGHT_MM = 7;
+/** Altura das barras em mm (bwip-js). Menor para caber código numérico abaixo. */
+const BARCODE_BAR_HEIGHT_MM = 5;
+/** Pixels por módulo do código de barras. 3–4 evita tremulação na impressão térmica (203 DPI). */
+const BARCODE_SCALE = 4;
+/** Tamanho da fonte do número abaixo do código de barras (pt). */
+const BARCODE_TEXT_FONT_SIZE = 4;
 
 @Injectable()
 export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
@@ -77,33 +81,37 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     const x = MARGIN_PT;
     const y = MARGIN_PT;
 
-    // Zona 1 (30mm): código de barras GTIN-13 (EAN-13)
+    // Zona 1 (30mm): código de barras GTIN-13 (EAN-13) + número abaixo
+    const barcodeText = (label.barcode || '').trim();
     try {
       const bwipjs = await import('bwip-js');
-      const barcodeText = (label.barcode || '').trim();
       const png = await bwipjs.default.toBuffer({
         bcid: 'ean13',
         text: barcodeText,
-        scale: 1,
+        scale: BARCODE_SCALE,
         height: BARCODE_BAR_HEIGHT_MM,
         includetext: false,
       });
       const imgW = png.readUInt32BE(16);
       const imgH = png.readUInt32BE(20);
       const barcodeHeightPt = Math.min(
-        CONTENT_HEIGHT_PT,
+        CONTENT_HEIGHT_PT - BARCODE_TEXT_FONT_SIZE * 1.5,
         BARCODE_ZONE_PT * (imgH / imgW),
       );
       const barcodeWidthPt = barcodeHeightPt * (imgW / imgH);
       const barcodeX = x + (BARCODE_ZONE_PT - barcodeWidthPt) / 2;
-      const barcodeY = y + (CONTENT_HEIGHT_PT - barcodeHeightPt) / 2;
+      const blockHeight = barcodeHeightPt + BARCODE_TEXT_FONT_SIZE * 1.3;
+      const barcodeY = y + (CONTENT_HEIGHT_PT - blockHeight) / 2;
       doc.image(png, barcodeX, barcodeY, {
         width: barcodeWidthPt,
         height: barcodeHeightPt,
       });
+      doc.fontSize(BARCODE_TEXT_FONT_SIZE).text(barcodeText, x, barcodeY + barcodeHeightPt + 1, {
+        width: BARCODE_ZONE_PT,
+        align: 'center',
+      });
     } catch {
-      const fallbackText = (label.barcode || '').trim() || '—';
-      doc.fontSize(5).text(fallbackText, x, y, {
+      doc.fontSize(BARCODE_TEXT_FONT_SIZE).text(barcodeText || '—', x, y, {
         width: BARCODE_ZONE_PT,
         align: 'center',
       });

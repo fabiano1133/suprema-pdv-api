@@ -89,14 +89,21 @@ export class ItemController {
 
   @Post('labels/pdf')
   @Header('Content-Type', 'application/pdf')
-  @Header('Content-Disposition', 'attachment; filename="etiquetas.pdf"')
+  @Header('Content-Disposition', 'inline; filename="etiquetas.pdf"')
+  @Header('Cache-Control', 'no-store, no-cache, must-revalidate')
+  @Header('Pragma', 'no-cache')
+  @Header('X-Content-Type-Options', 'nosniff')
   async generateLabelsPdf(
     @Body() body: GenerateItemLabelsDto,
   ): Promise<StreamableFile> {
     const dto = { items: body?.items ?? [] };
     const labels = await this.generateItemLabelsUseCase.execute(dto);
     const pdfBuffer = await this.labelPdfGenerator.generate(labels);
-    return new StreamableFile(pdfBuffer);
+    return new StreamableFile(pdfBuffer, {
+      type: 'application/pdf',
+      disposition: 'inline',
+      length: pdfBuffer.length,
+    });
   }
 
   @Get(':id')
