@@ -96,9 +96,9 @@ export class ItemController {
   async generateLabelsPdf(
     @Body() body: GenerateItemLabelsDto,
   ): Promise<StreamableFile> {
-    const dto = { items: body?.items ?? [] };
+    const dto = { items: body?.items ?? [], model: body?.model };
     const labels = await this.generateItemLabelsUseCase.execute(dto);
-    const pdfBuffer = await this.labelPdfGenerator.generate(labels);
+    const pdfBuffer = await this.labelPdfGenerator.generate(labels, body?.model);
     return new StreamableFile(pdfBuffer, {
       type: 'application/pdf',
       disposition: 'inline',

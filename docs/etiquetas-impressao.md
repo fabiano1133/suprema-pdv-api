@@ -1,5 +1,12 @@
 # Etiquetas — impressão em todos os navegadores e SO
 
+## Modelos de etiqueta
+
+- **95x12** (padrão): 95mm x 12mm, margem 1,5mm, três zonas (código de barras | SKU+valor+nome | rabicho).
+- **26x15x3**: Folha margem topo=0, esquerda=0,25cm. Etiqueta 2,60×1,50cm. **Colunas=3, Linhas=1** (3 etiquetas por linha, 1 linha por página). Espaço horizontal 0,30cm. Nome (4), preço (7), código de barras (altura 0,45cm, espessura 0,70, número 7).
+
+No `POST /api/v1/items/labels/pdf` envie `model: "95x12"` ou `model: "26x15x3"`; omitindo usa o padrão 95x12.
+
 ## Ajustes na API (backend)
 
 A resposta do `POST /api/v1/items/labels/pdf` foi configurada para padronizar a abertura e impressão:
