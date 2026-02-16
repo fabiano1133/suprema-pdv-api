@@ -10,6 +10,9 @@ import {
 /** 1mm em pontos (72 pt = 1 inch = 25,4mm). */
 const MM_TO_PT = 72 / 25.4;
 
+/** Multiplicador do scale do bwip-js para melhor nitidez na impressão (PNG com mais pixels, mesmo tamanho no PDF). */
+const BARCODE_QUALITY_SCALE = 2;
+
 /** Camufla o preço na etiqueta: 29.90 → 00299000, 109.90 → 001099000 (00 + centavos + 00). */
 function camouflagePrice(price: number): string {
   const cents = Math.round(price * 100);
@@ -240,13 +243,14 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     if (barcodeText && spaceForBarcode > 4) {
       try {
         const bwipjs = await import('bwip-js');
-        const scale = Math.max(2, Math.round(layout.barcodeScale));
+        const scale = Math.min(12, Math.max(2, Math.round(layout.barcodeScale * BARCODE_QUALITY_SCALE)));
         const png = (await bwipjs.default.toBuffer({
           bcid: 'ean13',
           text: barcodeText,
           scale,
           height: layout.barcodeBarHeightMm,
           includetext: false,
+          guardwhitespace: true,
         })) as Buffer;
         const imgW = png.readUInt32BE(16);
         const imgH = png.readUInt32BE(20);
@@ -279,12 +283,14 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     const barcodeText = (label.barcode || '').trim();
     try {
       const bwipjs = await import('bwip-js');
+      const scale = Math.min(12, Math.max(2, Math.round(layout.barcodeScale * BARCODE_QUALITY_SCALE)));
       const png = await bwipjs.default.toBuffer({
         bcid: 'ean13',
         text: barcodeText,
-        scale: layout.barcodeScale,
+        scale,
         height: layout.barcodeBarHeightMm,
         includetext: false,
+        guardwhitespace: true,
       });
       const imgW = png.readUInt32BE(16);
       const imgH = png.readUInt32BE(20);
