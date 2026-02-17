@@ -68,7 +68,7 @@ function layout95x12(): LabelLayout {
     barcodeTextFontSize: 5,
     textFontSize: 6,
     nameFontSize: 4,
-    nameMaxChars: 25,
+    nameMaxChars: 35,
     verticalLayout: false,
   };
 }
@@ -102,8 +102,8 @@ function layout26x15x3(): LabelLayout {
     barcodeScale: 6,
     barcodeTextFontSize: 5,
     textFontSize: 4,
-    nameFontSize: 5,
-    nameMaxChars: 14,
+    nameFontSize: 3,
+    nameMaxChars: 22,
     verticalLayout: true,
   };
 }
@@ -267,6 +267,13 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
         // fallback
       }
     }
+
+    const supplierCode = (label.supplierCode || '').trim().slice(0, layout.nameMaxChars);
+    if (supplierCode) {
+      currentY += barcodeHeightPt + gapPt;
+      doc.fontSize(layout.textFontSize);
+      doc.text(supplierCode, contentX, currentY, { width: contentWidthPt, align: 'center' });
+    }
   }
 
   /** Layout horizontal: código de barras à esquerda | SKU, preço, nome à direita. */
@@ -326,7 +333,8 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     const textBlockHeightPt = 2 * lineHeightPt + layout.nameFontSize * 1.1;
     const textStartY = y + (contentHeightPt - textBlockHeightPt) / 2;
     doc.fontSize(layout.textFontSize);
-    doc.text(label.sku, textX, textStartY, {
+    const supplierCodeRight = (label.supplierCode || '').trim().slice(0, layout.nameMaxChars);
+    doc.text(supplierCodeRight || '—', textX, textStartY, {
       width: textZonePt,
       align: 'center',
     });

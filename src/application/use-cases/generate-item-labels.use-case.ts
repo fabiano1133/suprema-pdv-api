@@ -64,6 +64,7 @@ export class GenerateItemLabelsUseCase implements IGenerateItemLabelsInboundPort
       sku: item.sku,
       price: roundPrice(item.price),
       barcode: item.barcode,
+      supplierCode: item.supplierCode,
     };
   }
 }

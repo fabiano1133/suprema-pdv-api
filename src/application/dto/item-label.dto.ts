@@ -10,4 +10,6 @@ export interface ItemLabelDto {
   price: number;
   /** Código de barras (para impressão/leitura). */
   barcode: string;
+  /** Código do fornecedor (ex.: no layout 26x15x3 é exibido abaixo do código de barras). */
+  supplierCode: string;
 }
