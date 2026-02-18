@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
+import SVGtoPDF from 'svg-to-pdfkit';
 import type { ItemLabelDto } from '../../application/dto/item-label.dto';
 import type { LabelModel } from '../../application/dto/generate-item-labels.dto';
 import {
@@ -27,9 +28,7 @@ interface LabelLayout {
   contentHeightPt: number;
   barcodeZonePt: number;
   textZonePt: number;
-  /** Quando definido, uma página = uma linha do rolo (várias etiquetas na horizontal com gap). */
   labelsPerRow?: number;
-  /** Espaço em mm entre etiquetas na horizontal (entre blocos da mesma linha). */
   gapBetweenLabelsMm?: number;
   barcodeBarHeightMm: number;
   barcodeMaxWidthMm: number;
@@ -40,17 +39,19 @@ interface LabelLayout {
   textFontSize: number;
   nameFontSize: number;
   nameMaxChars: number;
-  /** Layout vertical: nome, preço, código de barras (em vez de horizontal). */
   verticalLayout?: boolean;
-  /** Margem superior da folha (mm). Quando definido com marginLeftMm, usa margens customizadas. */
   marginTopMm?: number;
-  /** Margem esquerda da folha (mm). */
   marginLeftMm?: number;
+  rowPageWidthMm?: number;
+  contentGapPt?: number;
+  lineHeightMult?: number;
+  /** Layout vertical: gerar código de barras via toSVG (vetorial) em vez de PNG. */
+  useSvgBarcode?: boolean;
 }
 
-/** Modelo 95x12 — BOPP 95mm x 12mm, margem 1,5mm, zonas 30+30+30. */
+/** Modelo 95x12 — BOPP 95mm x 12mm. Margem 1mm, zonas ampliadas para preencher melhor a etiqueta. */
 function layout95x12(): LabelLayout {
-  const marginPt = 1.5 * MM_TO_PT;
+  const marginPt = 1 * MM_TO_PT;
   const pageWidthPt = 95 * MM_TO_PT;
   const pageHeightPt = 12 * MM_TO_PT;
   return {
@@ -58,26 +59,22 @@ function layout95x12(): LabelLayout {
     pageHeightPt,
     marginPt,
     contentHeightPt: pageHeightPt - 2 * marginPt,
-    barcodeZonePt: 30 * MM_TO_PT,
-    textZonePt: 30 * MM_TO_PT,
-    barcodeBarHeightMm: 4,
-    barcodeMaxWidthMm: 22,
-    barcodeLeftOffsetMm: 2,
-    textLeftOffsetMm: 2,
+    barcodeZonePt: 38 * MM_TO_PT,
+    textZonePt: 55 * MM_TO_PT,
+    barcodeBarHeightMm: 6.5,
+    barcodeMaxWidthMm: 26,
+    barcodeLeftOffsetMm: 1,
+    textLeftOffsetMm: 1,
     barcodeScale: 2,
-    barcodeTextFontSize: 5,
-    textFontSize: 6,
-    nameFontSize: 4,
-    nameMaxChars: 35,
+    barcodeTextFontSize: 6,
+    textFontSize: 7,
+    nameFontSize: 5,
+    nameMaxChars: 40,
     verticalLayout: false,
   };
 }
 
-/**
- * Modelo 26x15x3 — Colunas=3, Linhas=1 (3 etiquetas por linha, 1 linha por página).
- * Folha: margem topo=0, esquerda=0,25cm. Etiqueta 2,60×1,50cm, espaço horizontal 0,30cm.
- * Conteúdo: nome (4), preço (7), código de barras (altura 0,45cm, barras 0,70, número 7).
- */
+/** Modelo 26x15x3 — Configuração alinhada ao software antigo (Elgin L42 Pro, 3 colunas). */
 function layout26x15x3(): LabelLayout {
   const labelWidthMm = 26;
   const labelHeightMm = 15;
@@ -93,18 +90,19 @@ function layout26x15x3(): LabelLayout {
     textZonePt: 10 * MM_TO_PT,
     labelsPerRow: 3,
     gapBetweenLabelsMm: 3,
-    marginTopMm: 1.5,
-    marginLeftMm: 12,
-    barcodeBarHeightMm: 4.5,
-    barcodeMaxWidthMm: 22,
+    barcodeBarHeightMm: 12,
+    barcodeMaxWidthMm: 26,
     barcodeLeftOffsetMm: 0,
     textLeftOffsetMm: 0,
-    barcodeScale: 6,
-    barcodeTextFontSize: 5,
-    textFontSize: 4,
-    nameFontSize: 3,
-    nameMaxChars: 22,
+    barcodeScale: 1,
+    barcodeTextFontSize: 7,
+    textFontSize: 5,
+    nameFontSize: 4,
+    nameMaxChars: 24,
     verticalLayout: true,
+    contentGapPt: 0.5,
+    lineHeightMult: 1.05,
+    useSvgBarcode: true,
   };
 }
 
@@ -127,13 +125,18 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
 
     let pageSize: [number, number];
     let marginPt: number;
-    let marginObj: { top: number; left: number; right: number; bottom: number } | undefined;
+    let marginObj:
+      | { top: number; left: number; right: number; bottom: number }
+      | undefined;
 
     if (useRowLayout) {
       const perRow = layout.labelsPerRow!;
       const gapPt = layout.gapBetweenLabelsMm! * MM_TO_PT;
       const labelWidthPt = layout.pageWidthPt;
-      const rowPageWidthPt = perRow * labelWidthPt + (perRow - 1) * gapPt;
+      const rowPageWidthPt =
+        layout.rowPageWidthMm != null
+          ? layout.rowPageWidthMm * MM_TO_PT
+          : perRow * labelWidthPt + (perRow - 1) * gapPt;
       pageSize = [rowPageWidthPt, layout.pageHeightPt];
       if (layout.marginTopMm != null && layout.marginLeftMm != null) {
         const topPt = layout.marginTopMm * MM_TO_PT;
@@ -156,14 +159,17 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
         margin: docMargin as number,
         autoFirstPage: true,
       });
-      // Térmica: apenas preto, sem cores
       doc.fillColor('black');
       const chunks: Buffer[] = [];
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      if (useRowLayout && layout.labelsPerRow != null && layout.gapBetweenLabelsMm != null) {
+      if (
+        useRowLayout &&
+        layout.labelsPerRow != null &&
+        layout.gapBetweenLabelsMm != null
+      ) {
         const rowSize = layout.labelsPerRow;
         const gapPt = layout.gapBetweenLabelsMm * MM_TO_PT;
         const labelWidthPt = layout.pageWidthPt;
@@ -205,7 +211,7 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     }
   }
 
-  /** Layout vertical 26x15x3: nome (4), preço (7), código de barras (altura 0,45cm, número 7). */
+  /** Layout vertical 26x15x3: nome, preço, código de barras (imagem), supplierCode. */
   private async drawLabelVertical(
     doc: InstanceType<typeof PDFDocument>,
     label: ItemLabelDto,
@@ -213,70 +219,154 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     offsetXPt?: number,
   ): Promise<void> {
     const baseX = offsetXPt ?? layout.marginPt;
-    const baseY = layout.marginTopMm != null ? layout.marginTopMm * MM_TO_PT : layout.marginPt;
+    const baseY =
+      layout.marginTopMm != null
+        ? layout.marginTopMm * MM_TO_PT
+        : layout.marginPt;
     const contentWidthPt = layout.pageWidthPt;
     const contentHeightPt = layout.contentHeightPt;
     const contentX = baseX;
-    const gapPt = 1;
+    const gapPt = layout.contentGapPt ?? 1;
+    const lineMult = layout.lineHeightMult ?? 1.2;
 
     let currentY = baseY;
 
     const productName = (label.name || '').trim().slice(0, layout.nameMaxChars);
     if (productName) {
       doc.fontSize(layout.nameFontSize);
-      doc.text(productName, contentX, currentY, { width: contentWidthPt, align: 'center' });
-      currentY += layout.nameFontSize * 1.2 + gapPt;
+      doc.text(productName, contentX, currentY, {
+        width: contentWidthPt,
+        align: 'center',
+      });
+      currentY += layout.nameFontSize * lineMult + gapPt;
     }
 
     doc.fontSize(layout.textFontSize);
-    doc.text(camouflagePrice(label.price), contentX, currentY, { width: contentWidthPt, align: 'center' });
-    currentY += layout.textFontSize * 1.2 + gapPt;
+    doc.text(camouflagePrice(label.price), contentX, currentY, {
+      width: contentWidthPt,
+      align: 'center',
+    });
+    currentY += layout.textFontSize * lineMult + gapPt;
 
     const barcodeText = (label.barcode || '').trim();
-    doc.fontSize(layout.barcodeTextFontSize);
-    doc.text(barcodeText || '—', contentX, currentY, { width: contentWidthPt, align: 'center' });
-    currentY += layout.barcodeTextFontSize * 1.2 + gapPt;
-
     const spaceForBarcode = contentHeightPt - (currentY - baseY) - gapPt;
     let barcodeHeightPt = 0;
 
     if (barcodeText && spaceForBarcode > 4) {
-      try {
-        const bwipjs = await import('bwip-js');
-        const scale = Math.min(12, Math.max(2, Math.round(layout.barcodeScale * BARCODE_QUALITY_SCALE)));
-        const png = (await bwipjs.default.toBuffer({
-          bcid: 'ean13',
-          text: barcodeText,
-          scale,
-          height: layout.barcodeBarHeightMm,
-          includetext: false,
-          guardwhitespace: true,
-        })) as Buffer;
-        const imgW = png.readUInt32BE(16);
-        const imgH = png.readUInt32BE(20);
-        const maxBarcodeWidthPt = Math.min(layout.barcodeMaxWidthMm * MM_TO_PT, contentWidthPt);
-        barcodeHeightPt = Math.min(spaceForBarcode, layout.barcodeBarHeightMm * MM_TO_PT);
-        let barcodeWidthPt = barcodeHeightPt * (imgW / imgH);
-        if (barcodeWidthPt > maxBarcodeWidthPt) {
-          barcodeWidthPt = maxBarcodeWidthPt;
-          barcodeHeightPt = barcodeWidthPt * (imgH / imgW);
+      const maxBarcodeWidthPt = Math.min(
+        layout.barcodeMaxWidthMm * MM_TO_PT,
+        contentWidthPt,
+      );
+      const maxBarcodeHeightPt = Math.min(
+        spaceForBarcode,
+        layout.barcodeBarHeightMm * MM_TO_PT,
+      );
+      const barcodeOffsetLeftPt = 1.5 * MM_TO_PT;
+
+      if (layout.useSvgBarcode) {
+        try {
+          const bwipjs = await import('bwip-js');
+          const api = bwipjs.default;
+          
+          const opts = {
+            bcid: 'ean13',
+            text: barcodeText,
+            scale: 2,
+            height: 8,
+            includetext: false,
+            guardwhitespace: false,
+          };
+          const svgString = api.render(opts, api.drawingSVG());
+          const vbMatch = svgString.match(
+            /viewBox\s*=\s*["']?\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)/,
+          );
+          let vbX: number, vbY: number, vbW: number, vbH: number;
+          if (vbMatch) {
+            vbX = parseFloat(vbMatch[1]);
+            vbY = parseFloat(vbMatch[2]);
+            vbW = parseFloat(vbMatch[3]);
+            vbH = parseFloat(vbMatch[4]);
+          } else {
+            const wMatch = svgString.match(/width="([^"]+)"/);
+            const hMatch = svgString.match(/height="([^"]+)"/);
+            vbX = 0;
+            vbY = 0;
+            vbW = wMatch ? parseFloat(wMatch[1]) : 100;
+            vbH = hMatch ? parseFloat(hMatch[1]) : 40;
+          }
+          const barcodeWidthPt = contentWidthPt;
+          const scaleFactor = Math.min(
+            barcodeWidthPt / vbW,
+            maxBarcodeHeightPt / vbH,
+          );
+          const renderW = vbW * scaleFactor;
+          const renderH = vbH * scaleFactor;
+          barcodeHeightPt = renderH;
+          const barcodeX = contentX + (contentWidthPt - renderW) / 2 - barcodeOffsetLeftPt;
+
+          doc.save();
+          doc.translate(barcodeX, currentY);
+          doc.scale(scaleFactor);
+          doc.translate(-vbX, -vbY);
+          SVGtoPDF(doc, svgString, 0, 0);
+          doc.restore();
+        } catch {
+          // fallback
         }
-        const barcodeX = contentX + (contentWidthPt - barcodeWidthPt) / 2;
-        doc.image(png, barcodeX, currentY, { width: barcodeWidthPt, height: barcodeHeightPt });
-      } catch {
-        // fallback
+      } else {
+        try {
+          const bwipjs = await import('bwip-js');
+          const scale = Math.min(
+            12,
+            Math.max(
+              2,
+              Math.round(layout.barcodeScale * BARCODE_QUALITY_SCALE),
+            ),
+          );
+          const png = (await bwipjs.default.toBuffer({
+            bcid: 'ean13',
+            text: barcodeText,
+            scale,
+            height: layout.barcodeBarHeightMm,
+            includetext: false,
+            guardwhitespace: true,
+          })) as Buffer;
+          const imgW = png.readUInt32BE(16);
+          const imgH = png.readUInt32BE(20);
+          barcodeHeightPt = Math.min(
+            spaceForBarcode,
+            layout.barcodeBarHeightMm * MM_TO_PT,
+          );
+          let barcodeWidthPt = barcodeHeightPt * (imgW / imgH);
+          if (barcodeWidthPt > maxBarcodeWidthPt) {
+            barcodeWidthPt = maxBarcodeWidthPt;
+            barcodeHeightPt = barcodeWidthPt * (imgH / imgW);
+          }
+          const barcodeX = contentX + (contentWidthPt - barcodeWidthPt) / 2 - barcodeOffsetLeftPt;
+          doc.image(png, barcodeX, currentY, {
+            width: barcodeWidthPt,
+            height: barcodeHeightPt,
+          });
+        } catch {
+          // fallback
+        }
       }
     }
 
-    const supplierCode = (label.supplierCode || '').trim().slice(0, layout.nameMaxChars);
+    const supplierCode = (label.supplierCode || '')
+      .trim()
+      .slice(0, layout.nameMaxChars);
     if (supplierCode) {
       currentY += barcodeHeightPt + gapPt;
       doc.fontSize(layout.textFontSize);
-      doc.text(supplierCode, contentX, currentY, { width: contentWidthPt, align: 'center' });
+      doc.text(supplierCode, contentX, currentY, {
+        width: contentWidthPt,
+        align: 'center',
+      });
     }
   }
 
-  /** Layout horizontal: código de barras à esquerda | SKU, preço, nome à direita. */
+  /** Layout horizontal: código de barras à esquerda | supplierCode, preço, nome à direita. */
   private async drawLabelHorizontal(
     doc: InstanceType<typeof PDFDocument>,
     label: ItemLabelDto,
@@ -290,7 +380,10 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     const barcodeText = (label.barcode || '').trim();
     try {
       const bwipjs = await import('bwip-js');
-      const scale = Math.min(12, Math.max(2, Math.round(layout.barcodeScale * BARCODE_QUALITY_SCALE)));
+      const scale = Math.min(
+        12,
+        Math.max(2, Math.round(layout.barcodeScale * BARCODE_QUALITY_SCALE)),
+      );
       const png = await bwipjs.default.toBuffer({
         bcid: 'ean13',
         text: barcodeText,
@@ -302,7 +395,7 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
       const imgW = png.readUInt32BE(16);
       const imgH = png.readUInt32BE(20);
       const maxBarcodeWidthPt = layout.barcodeMaxWidthMm * MM_TO_PT;
-      const maxBarcodeHeightPt = contentHeightPt - layout.barcodeTextFontSize * 1.5;
+      const maxBarcodeHeightPt = contentHeightPt;
       let barcodeWidthPt = maxBarcodeWidthPt;
       let barcodeHeightPt = barcodeWidthPt * (imgH / imgW);
       if (barcodeHeightPt > maxBarcodeHeightPt) {
@@ -311,21 +404,13 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
       }
       const leftOffsetPt = layout.barcodeLeftOffsetMm * MM_TO_PT;
       const barcodeX = x + (barcodeZonePt - barcodeWidthPt) / 2 - leftOffsetPt;
-      const blockHeight = barcodeHeightPt + layout.barcodeTextFontSize * 1.3;
-      const barcodeY = y + (contentHeightPt - blockHeight) / 2;
+      const barcodeY = y + (contentHeightPt - barcodeHeightPt) / 2;
       doc.image(png, barcodeX, barcodeY, {
         width: barcodeWidthPt,
         height: barcodeHeightPt,
       });
-      doc.fontSize(layout.barcodeTextFontSize).text(barcodeText, barcodeX, barcodeY + barcodeHeightPt + 1, {
-        width: barcodeWidthPt,
-        align: 'center',
-      });
     } catch {
-      doc.fontSize(layout.barcodeTextFontSize).text(barcodeText || '—', x, y, {
-        width: barcodeZonePt,
-        align: 'center',
-      });
+      // sem número do barcode
     }
 
     const textX = x + barcodeZonePt - layout.textLeftOffsetMm * MM_TO_PT;
@@ -333,23 +418,27 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     const textBlockHeightPt = 2 * lineHeightPt + layout.nameFontSize * 1.1;
     const textStartY = y + (contentHeightPt - textBlockHeightPt) / 2;
     doc.fontSize(layout.textFontSize);
-    const supplierCodeRight = (label.supplierCode || '').trim().slice(0, layout.nameMaxChars);
+    const supplierCodeRight = (label.supplierCode || '')
+      .trim()
+      .slice(0, layout.nameMaxChars);
     doc.text(supplierCodeRight || '—', textX, textStartY, {
       width: textZonePt,
       align: 'center',
     });
-    doc.fontSize(layout.textFontSize).text(
-      camouflagePrice(label.price),
-      textX,
-      textStartY + lineHeightPt,
-      { width: textZonePt, align: 'center' },
-    );
-    const productName = (label.name || '').trim().slice(0, layout.nameMaxChars);
-    if (productName) {
-      doc.fontSize(layout.nameFontSize).text(productName, textX, textStartY + 2 * lineHeightPt, {
+    doc
+      .fontSize(layout.textFontSize)
+      .text(camouflagePrice(label.price), textX, textStartY + lineHeightPt, {
         width: textZonePt,
         align: 'center',
       });
+    const productName = (label.name || '').trim().slice(0, layout.nameMaxChars);
+    if (productName) {
+      doc
+        .fontSize(layout.nameFontSize)
+        .text(productName, textX, textStartY + 2 * lineHeightPt, {
+          width: textZonePt,
+          align: 'center',
+        });
     }
   }
 
@@ -363,7 +452,13 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
-      doc.fontSize(layout.textFontSize).text('Nenhuma etiqueta para imprimir.', layout.marginPt, layout.marginPt);
+      doc
+        .fontSize(layout.textFontSize)
+        .text(
+          'Nenhuma etiqueta para imprimir.',
+          layout.marginPt,
+          layout.marginPt,
+        );
       doc.end();
     });
   }
