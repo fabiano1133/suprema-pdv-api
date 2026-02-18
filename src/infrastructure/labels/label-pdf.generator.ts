@@ -249,7 +249,12 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     currentY += layout.textFontSize * lineMult + gapPt;
 
     const barcodeText = (label.barcode || '').trim();
-    const spaceForBarcode = contentHeightPt - (currentY - baseY) - gapPt;
+    const reservedBottomPt =
+      gapPt + layout.textFontSize * lineMult + 0.5;
+    const spaceForBarcode = Math.max(
+      0,
+      contentHeightPt - (currentY - baseY) - gapPt - reservedBottomPt,
+    );
     let barcodeHeightPt = 0;
 
     if (barcodeText && spaceForBarcode > 4) {
