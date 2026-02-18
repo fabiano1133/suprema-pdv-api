@@ -14,6 +14,9 @@ const MM_TO_PT = 72 / 25.4;
 /** Multiplicador do scale do bwip-js para melhor nitidez na impressão (PNG com mais pixels, mesmo tamanho no PDF). */
 const BARCODE_QUALITY_SCALE = 2;
 
+/** Recuo do conteúdo em relação à borda da etiqueta (pt). */
+const LABEL_BORDER_INSET_PT = 2;
+
 /** Camufla o preço na etiqueta: 29.90 → 00299000, 109.90 → 001099000 (00 + centavos + 00). */
 function camouflagePrice(price: number): string {
   const cents = Math.round(price * 100);
@@ -90,6 +93,7 @@ function layout26x15x3(): LabelLayout {
     textZonePt: 10 * MM_TO_PT,
     labelsPerRow: 3,
     gapBetweenLabelsMm: 3,
+    rowPageWidthMm: 89,
     barcodeBarHeightMm: 12,
     barcodeMaxWidthMm: 26,
     barcodeLeftOffsetMm: 0,
@@ -204,6 +208,18 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     offsetXPt?: number,
   ): Promise<void> {
     doc.fillColor('black');
+    const labelX = offsetXPt ?? layout.marginPt;
+    const labelY =
+      layout.marginTopMm != null
+        ? layout.marginTopMm * MM_TO_PT
+        : layout.marginPt;
+    const labelW = layout.pageWidthPt;
+    const labelH = layout.pageHeightPt;
+    const borderRadiusPt = 2;
+    doc.strokeColor('#999');
+    doc.lineWidth(0.4);
+    doc.roundedRect(labelX, labelY, labelW, labelH, borderRadiusPt).stroke();
+    doc.strokeColor('black');
     if (layout.verticalLayout) {
       await this.drawLabelVertical(doc, label, layout, offsetXPt);
     } else {
@@ -218,13 +234,13 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     layout: LabelLayout,
     offsetXPt?: number,
   ): Promise<void> {
-    const baseX = offsetXPt ?? layout.marginPt;
+    const baseX = (offsetXPt ?? layout.marginPt) + LABEL_BORDER_INSET_PT;
     const baseY =
-      layout.marginTopMm != null
+      (layout.marginTopMm != null
         ? layout.marginTopMm * MM_TO_PT
-        : layout.marginPt;
-    const contentWidthPt = layout.pageWidthPt;
-    const contentHeightPt = layout.contentHeightPt;
+        : layout.marginPt) + LABEL_BORDER_INSET_PT;
+    const contentWidthPt = layout.pageWidthPt - 2 * LABEL_BORDER_INSET_PT;
+    const contentHeightPt = layout.contentHeightPt - 2 * LABEL_BORDER_INSET_PT;
     const contentX = baseX;
     const gapPt = layout.contentGapPt ?? 1;
     const lineMult = layout.lineHeightMult ?? 1.2;
@@ -266,7 +282,7 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
         spaceForBarcode,
         layout.barcodeBarHeightMm * MM_TO_PT,
       );
-      const barcodeOffsetLeftPt = 1.5 * MM_TO_PT;
+      const barcodeOffsetLeftPt = 3.0 * MM_TO_PT;
 
       if (layout.useSvgBarcode) {
         try {
@@ -378,9 +394,11 @@ export class LabelPdfGeneratorService implements ILabelPdfGeneratorPort {
     layout: LabelLayout,
     offsetXPt?: number,
   ): Promise<void> {
-    const x = offsetXPt ?? layout.marginPt;
-    const y = layout.marginPt;
-    const { barcodeZonePt, textZonePt, contentHeightPt } = layout;
+    const x = (offsetXPt ?? layout.marginPt) + LABEL_BORDER_INSET_PT;
+    const y = layout.marginPt + LABEL_BORDER_INSET_PT;
+    const contentHeightPt =
+      layout.contentHeightPt - 2 * LABEL_BORDER_INSET_PT;
+    const { barcodeZonePt, textZonePt } = layout;
 
     const barcodeText = (label.barcode || '').trim();
     try {
